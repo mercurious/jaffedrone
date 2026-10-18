@@ -6,17 +6,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define JD_VERSION "0.0.2"
+#define JD_VERSION "0.0.3"
 
 #define NS 5
 #define NSP 10 /* params per string */
-#define NGP 7  /* global params */
+#define NGP 8  /* global params */
 #define NLFO 2
 #define NLP 4  /* params per LFO */
 #define NFX 9  /* effect params */
 
 enum { SP_NOTE, SP_FINE, SP_LEVEL, SP_BOW, SP_PLUCK, SP_DECAY, SP_BRIGHT, SP_FOLD, SP_STIFF, SP_POS };
-enum { GP_MODE, GP_ROOT, GP_BPM, GP_DRIFT, GP_CUTOFF, GP_MASTER, GP_SYNC };
+enum { GP_MODE, GP_ROOT, GP_BPM, GP_DRIFT, GP_GLIDE, GP_CUTOFF, GP_MASTER, GP_SYNC };
 enum { LP_RATE, LP_SHAPE, LP_TARGET, LP_DEPTH };
 enum { FX_DTIME, FX_DFB, FX_DMIX, FX_VSEND, FX_VTIME, FX_VTONE, FX_GRATE, FX_GDUTY, FX_GSMOOTH };
 enum { MODE_MONO, MODE_CHORD };

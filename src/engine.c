@@ -5,17 +5,27 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SONG_MAGIC 0x4a445204u    /* JDR4: five strings */
+#define SONG_MAGIC 0x4a445205u    /* JDR5: GLIDE global */
+#define SONG_MAGIC_V4 0x4a445204u /* JDR4: five strings (v0.0.2) */
 #define SONG_MAGIC_V3 0x4a445203u /* JDR3: four strings (v0.0.1) */
 #define NS_V3 4
+#define NGP_V4 7 /* no GLIDE: mode, root, bpm, drift, cutoff, master, sync */
 typedef struct {
     uint32_t magic;
     int on[NS_V3];
     int sp[NS_V3][NSP];
-    int gp[NGP];
+    int gp[NGP_V4];
     int lfo[NLFO][NLP];
     int fx[NFX];
 } SongV3;
+typedef struct {
+    uint32_t magic;
+    int on[NS];
+    int sp[NS][NSP];
+    int gp[NGP_V4];
+    int lfo[NLFO][NLP];
+    int fx[NFX];
+} SongV4;
 
 Song song;
 Live live;
@@ -25,8 +35,8 @@ static const ParamDef sparams[NSP] = {{"NOTE", -24, 24}, {"FINE", -50, 50}, {"LE
                                       {"BRIGHT", 0, 100}, {"FOLD", 0, 100},  {"STIFF", 0, 100},
                                       {"POS", 0, 100}};
 static const ParamDef gparams[NGP] = {{"VOICING", 0, 1},  {"ROOT", 24, 72},  {"BPM", 40, 200},
-                                      {"DRIFT", 0, 100},  {"CUTOFF", 0, 100}, {"MASTER", 0, 100},
-                                      {"WIFI SYNC", 0, NSYNCMODE - 1}};
+                                      {"DRIFT", 0, 100},  {"GLIDE", 0, 7},    {"CUTOFF", 0, 100},
+                                      {"MASTER", 0, 100}, {"WIFI SYNC", 0, NSYNCMODE - 1}};
 static const ParamDef lparams[NLP] = {{"RATE", 0, 6}, {"SHAPE", 0, NSH - 1}, {"TARGET", 0, NLT - 1}, {"DEPTH", 0, 100}};
 static const ParamDef fparams[NFX] = {{"TIME", 0, 7},   {"FEEDBK", 0, 95}, {"MIX", 0, 100},
                                       {"SEND", 0, 100}, {"TIME", 0, 100},  {"TONE", 0, 100},
@@ -43,13 +53,16 @@ static const char *const shape_names[NSH] = {"SINE", "TRI", "SAW", "SQUARE", "RA
 static const char *const target_names[NLT] = {"CUTOFF", "LEVEL", "PITCH", "BOW", "DELAY", "REVERB"};
 static const float dly_div16[8] = {1.f, 2.f, 3.f, 4.f, 6.f, 8.f, 12.f, 16.f};
 static const char *const dly_names[8] = {"1/16", "1/8", "3/16", "1/4", "3/8", "1/2", "3/4", "1 BAR"};
+/* GLIDE: how long a note change takes to settle, in 16ths of the tempo */
+static const float glide_div16[8] = {0.f, 0.5f, 1.f, 2.f, 4.f, 8.f, 16.f, 32.f};
+static const char *const glide_names[8] = {"OFF", "1/32", "1/16", "1/8", "1/4", "1/2", "1 BAR", "2 BARS"};
 /* {note, fine, level, bow, pluck, decay, bright, fold, stiff, pos} */
 static const int def_sp[NS][NSP] = {{0, 0, 80, 35, 3, 85, 45, 0, 0, 0},
                                     {7, -4, 65, 45, 0, 92, 40, 0, 0, 0},
                                     {12, 3, 55, 40, 0, 95, 55, 0, 0, 0},
                                     {19, 0, 40, 50, 4, 90, 65, 0, 0, 0},
                                     {24, 2, 30, 55, 5, 93, 70, 0, 0, 0}};
-static const int def_gp[NGP] = {MODE_CHORD, 45, 72, 30, 70, 80, SYNC_OFF};
+static const int def_gp[NGP] = {MODE_CHORD, 45, 72, 30, 3, 70, 80, SYNC_OFF};
 static const int def_lfo[NLFO][NLP] = {{2, SH_SINE, LT_CUTOFF, 35}, {4, SH_TRI, LT_LEVEL, 0}};
 static const int def_fx[NFX] = {5, 45, 25, 35, 60, 55, 0, 5, 40};
 
@@ -95,6 +108,7 @@ void gparam_format(int p, char *b, int n)
     switch (p) {
     case GP_MODE: snprintf(b, n, "%s", x == MODE_MONO ? "MONO" : "CHORD"); return;
     case GP_ROOT: note_name(x, b, n); return;
+    case GP_GLIDE: snprintf(b, n, "%s", glide_names[x]); return;
     case GP_SYNC: snprintf(b, n, "%s", sync_names[x]); return;
     default: snprintf(b, n, "%d", x); return;
     }
@@ -163,6 +177,8 @@ typedef struct {
     int burst; /* samples of pluck burst left */
     float burst_amp;
     float ap[2][2]; /* STIFF: two dispersive allpasses in the loop */
+    float midi_cur; /* GLIDE: the pitch slides here toward its target */
+    int midi_set;
     /* per sub-block targets, ramped */
     float D, D_cur, lvl, lvl_cur;
 } String;
@@ -229,7 +245,8 @@ void engine_set_position(double steps)
 void engine_set_rate(double r) { sync_rate = r < 0.9 ? 0.9 : r > 1.1 ? 1.1 : r; }
 
 /* a new chord: notes from a minor pentatonic + major sixth, spread over
- * three octaves, low to high */
+ * three octaves, low to high. The strings are not plucked: they keep
+ * ringing and slide (or jump) to the new notes, see GLIDE. */
 void engine_randomize(void)
 {
     static const int scale[] = {0, 3, 5, 7, 9, 10};
@@ -241,7 +258,6 @@ void engine_randomize(void)
             note -= 12;
         song.sp[s][SP_NOTE] = note;
         song.sp[s][SP_FINE] = (int)(fnoise() * 8.f);
-        string_pluck(&str[s], 0.9f);
     }
 }
 
@@ -316,6 +332,7 @@ void engine_render(int16_t *out, int frames)
     float meter[NS] = {0}, mm = 0.f;
     int mono = song.gp[GP_MODE] == MODE_MONO;
     float sps16 = sr * 15.f / bpm_f; /* samples per 16th */
+    float glide_samps = sps16 * glide_div16[song.gp[GP_GLIDE]];
     float dly_target = fminf(sps16 * dly_div16[song.fx[FX_DTIME]], DLY_MAX - 4.f);
     float dly_fb = song.fx[FX_DFB] / 100.f, dly_mix_p = song.fx[FX_DMIX] / 100.f;
     if (dly_time_cur <= 0.f)
@@ -376,7 +393,15 @@ void engine_render(int16_t *out, int frames)
         float dly_mix = dly_mix_p * m_dly, vsend = verb_send * m_verb;
         for (int s = 0; s < NS; s++) {
             String *st = &str[s];
-            float hz = midi_hz(base_midi[s] + m_pitch);
+            /* portamento: a lag toward the target pitch that settles in
+             * about the GLIDE time (4 time constants) */
+            if (!st->midi_set || glide_samps <= 0.f) {
+                st->midi_cur = base_midi[s];
+                st->midi_set = 1;
+            }
+            else
+                st->midi_cur += (base_midi[s] - st->midi_cur) * (1.f - expf(-4.f * nn / glide_samps));
+            float hz = midi_hz(st->midi_cur + m_pitch);
             hz = fmaxf(20.f, fminf(hz, sr / 8.f));
             float lp_delay = (1.f - lp_k[s]) / lp_k[s];
             if (lp_delay > 6.f)
@@ -581,7 +606,35 @@ void song_default(void)
     bpm_f = (float)song.gp[GP_BPM];
 }
 
-/* a four-string save: strings 1-4 as saved, string 5 from the defaults */
+/* globals from a save without GLIDE */
+static void gp_from_v4(Song *s, const int *g)
+{
+    s->gp[GP_MODE] = g[0];
+    s->gp[GP_ROOT] = g[1];
+    s->gp[GP_BPM] = g[2];
+    s->gp[GP_DRIFT] = g[3];
+    s->gp[GP_CUTOFF] = g[4];
+    s->gp[GP_MASTER] = g[5];
+    s->gp[GP_SYNC] = g[6];
+}
+
+/* a v0.0.2 save: five strings, no GLIDE (keeps its default) */
+static int load_v4(Song *s, const unsigned char *buf, size_t got)
+{
+    SongV4 o;
+    if (got != sizeof o)
+        return 0;
+    memcpy(&o, buf, sizeof o);
+    fill_default(s);
+    memcpy(s->on, o.on, sizeof s->on);
+    memcpy(s->sp, o.sp, sizeof s->sp);
+    gp_from_v4(s, o.gp);
+    memcpy(s->lfo, o.lfo, sizeof s->lfo);
+    memcpy(s->fx, o.fx, sizeof s->fx);
+    return 1;
+}
+
+/* a v0.0.1 save: strings 1-4 as saved, string 5 and GLIDE from the defaults */
 static int load_v3(Song *s, const unsigned char *buf, size_t got)
 {
     SongV3 o;
@@ -593,7 +646,7 @@ static int load_v3(Song *s, const unsigned char *buf, size_t got)
         s->on[i] = o.on[i];
         memcpy(s->sp[i], o.sp[i], sizeof s->sp[i]);
     }
-    memcpy(s->gp, o.gp, sizeof s->gp);
+    gp_from_v4(s, o.gp);
     memcpy(s->lfo, o.lfo, sizeof s->lfo);
     memcpy(s->fx, o.fx, sizeof s->fx);
     return 1;
@@ -613,6 +666,10 @@ int song_load(const char *path)
         memcpy(&magic, buf, sizeof magic);
     if (magic == SONG_MAGIC && got == sizeof s)
         memcpy(&s, buf, sizeof s);
+    else if (magic == SONG_MAGIC_V4) {
+        if (!load_v4(&s, buf, got))
+            return 0;
+    }
     else if (magic == SONG_MAGIC_V3) {
         if (!load_v3(&s, buf, got))
             return 0;

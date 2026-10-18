@@ -70,6 +70,25 @@ static double rms_of(const int16_t *pcm, int from, int n)
     return sqrt(r / n);
 }
 
+/* pitch of the left channel by autocorrelation, 50..400 Hz */
+static double hz_of(const int16_t *pcm, int from, int n)
+{
+    int best = 0;
+    double bestc = -1;
+    float *x = malloc(sizeof(float) * n);
+    for (int i = 0; i < n; i++)
+        x[i] = pcm[2 * (i + from)];
+    for (int lag = RATE / 400; lag < RATE / 50; lag++) {
+        double c = 0;
+        for (int i = 0; i + lag < n; i++)
+            c += (double)x[i] * x[i + lag];
+        if (c > bestc)
+            bestc = c, best = lag;
+    }
+    free(x);
+    return (double)RATE / best;
+}
+
 int main(int argc, char **argv)
 {
     const char *out = argc > 1 ? argv[1] : ".";
@@ -115,22 +134,23 @@ int main(int argc, char **argv)
     engine_render(pcm, RATE / 10);
     engine_pluck(0);
     engine_render(pcm, RATE);
-    {
-        int n = RATE / 2, best = 0;
-        double bestc = -1;
-        float *x = malloc(sizeof(float) * n);
-        for (int i = 0; i < n; i++)
-            x[i] = pcm[2 * (i + RATE / 4)];
-        for (int lag = RATE / 400; lag < RATE / 50; lag++) {
-            double c = 0;
-            for (int i = 0; i + lag < n; i++)
-                c += (double)x[i] * x[i + lag];
-            if (c > bestc)
-                bestc = c, best = lag;
-        }
-        printf("tuning: string 1 period %d samples = %.2f Hz (want 110)\n", best, (double)RATE / best);
-        free(x);
-    }
+    printf("tuning: string 1 = %.2f Hz (want 110)\n", hz_of(pcm, RATE / 4, RATE / 2));
+
+    /* glide: an octave up with GLIDE = 1 BAR (3.3 s at 72) slides, no pluck */
+    song.sp[0][SP_BOW] = 50; /* keep it ringing without a pluck */
+    engine_render(pcm, RATE);
+    song.gp[GP_GLIDE] = 6;
+    song.sp[0][SP_NOTE] = 12;
+    engine_render(pcm, RATE / 2);
+    double g1 = hz_of(pcm, RATE / 4, RATE / 4);
+    engine_render(pcm, RATE * 5);
+    double g2 = hz_of(pcm, RATE * 4, RATE);
+    printf("glide 1 BAR: 0.4 s after the change %.1f Hz (between 110 and 220), after 5.5 s %.1f Hz (220), rms %.0f\n", g1, g2,
+           rms_of(pcm, RATE * 4, RATE));
+    song.gp[GP_GLIDE] = 0;
+    song.sp[0][SP_NOTE] = 0;
+    engine_render(pcm, RATE / 4);
+    printf("glide OFF: 0.1 s after the change %.1f Hz (110)\n", hz_of(pcm, RATE / 8, RATE / 8));
 
     /* mono voicing: every string sits on string 1's note */
     song_default();
@@ -141,24 +161,43 @@ int main(int argc, char **argv)
 
     /* save compatibility: a v0.0.1 four-string file loads, string 5 gets defaults */
     {
-        int32_t old[1 + 4 + 4 * NSP + NGP + NLFO * NLP + NFX];
+        enum { NGP_OLD = 7 }; /* before GLIDE */
+        int32_t old[1 + 4 + 4 * NSP + NGP_OLD + NLFO * NLP + NFX];
         memset(old, 0, sizeof old);
         old[0] = 0x4a445203; /* JDR3 */
         for (int s = 0; s < 4; s++)
             old[1 + s] = s != 1;
         old[1 + 4 + 1 * NSP + SP_NOTE] = 5;
         old[1 + 4 + 3 * NSP + SP_LEVEL] = 77;
-        old[1 + 4 + 4 * NSP + GP_BPM] = 99;
-        old[1 + 4 + 4 * NSP + NGP + NLFO * NLP + FX_DMIX] = 66;
+        old[1 + 4 + 4 * NSP + 2] = 99; /* bpm */
+        old[1 + 4 + 4 * NSP + 4] = 33; /* cutoff, which GLIDE now sits before */
+        old[1 + 4 + 4 * NSP + NGP_OLD + NLFO * NLP + FX_DMIX] = 66;
         snprintf(path, sizeof path, "%s/old_v3.sav", out);
         FILE *f = fopen(path, "wb");
         fwrite(old, 1, sizeof old, f);
         fclose(f);
         song_default();
         int ok = song_load(path);
-        printf("save compat v0.0.1: load=%d on2=%d note2=%d level4=%d bpm=%d dmix=%d string5 level=%d on=%d\n", ok,
-               song.on[1], song.sp[1][SP_NOTE], song.sp[3][SP_LEVEL], song.gp[GP_BPM], song.fx[FX_DMIX],
-               song.sp[4][SP_LEVEL], song.on[4]);
+        printf("save compat v0.0.1: load=%d on2=%d note2=%d level4=%d bpm=%d cutoff=%d glide=%d dmix=%d string5 level=%d on=%d\n",
+               ok, song.on[1], song.sp[1][SP_NOTE], song.sp[3][SP_LEVEL], song.gp[GP_BPM], song.gp[GP_CUTOFF],
+               song.gp[GP_GLIDE], song.fx[FX_DMIX], song.sp[4][SP_LEVEL], song.on[4]);
+        /* a v0.0.2 file: five strings, seven globals */
+        int32_t old4[1 + NS + NS * NSP + NGP_OLD + NLFO * NLP + NFX];
+        memset(old4, 0, sizeof old4);
+        old4[0] = 0x4a445204; /* JDR4 */
+        for (int s = 0; s < NS; s++)
+            old4[1 + s] = 1;
+        old4[1 + NS + 4 * NSP + SP_NOTE] = 9;
+        old4[1 + NS + NS * NSP + 4] = 44; /* cutoff */
+        old4[1 + NS + NS * NSP + 6] = 2;  /* sync LEAD */
+        snprintf(path, sizeof path, "%s/old_v4.sav", out);
+        f = fopen(path, "wb");
+        fwrite(old4, 1, sizeof old4, f);
+        fclose(f);
+        song_default();
+        ok = song_load(path);
+        printf("save compat v0.0.2: load=%d note5=%d cutoff=%d sync=%d glide=%d\n", ok, song.sp[4][SP_NOTE],
+               song.gp[GP_CUTOFF], song.gp[GP_SYNC], song.gp[GP_GLIDE]);
     }
 
     /* tone shapers: each must change the spectrum, not the level much */

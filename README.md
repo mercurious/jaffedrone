@@ -12,8 +12,10 @@ master lowpass and a reverb.
 
 STRINGS page: left/right picks a string, up/down a parameter, Y/X adjusts,
 A toggles the string, B plucks it. DRONE page: up/down and Y/X edit the
-global parameters, B plucks everything. SELECT deals a new chord, START
-starts or stops the drone, MENU exits.
+global parameters, B plucks everything. SELECT deals a new chord without
+plucking: the strings keep ringing and slide to the new notes over the
+GLIDE time (a tempo division, or OFF for a jump). START starts or stops the
+drone, MENU exits.
 
 ## Build
 
