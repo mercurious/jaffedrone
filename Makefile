@@ -56,3 +56,8 @@ clean:
 	rm -rf build $(APP)/jaffedrone
 
 .PHONY: all test zip install clean
+
+# host-side wifi sync interop check (run alongside HI5's)
+build/jd_synctest: $(SRC) src/main_synctest.c $(HDR)
+	@mkdir -p build
+	cc $(CFLAGS) -o $@ $(SRC) src/main_synctest.c -lm
