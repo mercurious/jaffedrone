@@ -19,8 +19,8 @@
 #define C_LINE 0x3a3f4c
 #define C_TEXT 0xf2ebdd
 #define C_DIM 0x7d7f8a
-#define C_COPPER 0xd08a46
-#define C_CEDAR 0x9c6b45
+#define C_COPPER 0xb3875c
+#define C_CEDAR 0x7f6553
 #define C_SAND 0xd9c3a0
 #define C_SEA 0x7fd1a8
 #define C_RED 0xff5a50
@@ -33,7 +33,7 @@ static void nop(void) {}
 void (*ui_lock)(void) = nop;
 void (*ui_unlock)(void) = nop;
 
-static const uint32_t scol[NS] = {0xd9a066, 0xc77b4e, 0xd9c3a0, 0x7f9aa6};
+static const uint32_t scol[NS] = {0xc9a67c, 0xad7f61, 0xd9c3a0, 0x7f9aa6};
 static const char *const page_names[PAGE_COUNT] = {"STRINGS", "DRONE", "MOD", "FX"};
 static int page, cur_s, cur_p, gcur, mcur_l, mcur_p, fcur_c, fcur_p;
 static int held[BTN_COUNT], hold_ms[BTN_COUNT], rep_ms[BTN_COUNT], rep_n[BTN_COUNT];
