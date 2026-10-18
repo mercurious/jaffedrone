@@ -33,7 +33,7 @@ static void nop(void) {}
 void (*ui_lock)(void) = nop;
 void (*ui_unlock)(void) = nop;
 
-static const uint32_t scol[NS] = {0xc9a67c, 0xad7f61, 0xd9c3a0, 0x7f9aa6};
+static const uint32_t scol[NS] = {0xc9a67c, 0xad7f61, 0xd9c3a0, 0x9fb7a4, 0x7f9aa6};
 static const char *const page_names[PAGE_COUNT] = {"STRINGS", "DRONE", "MOD", "FX"};
 static int page, cur_s, cur_p, gcur, mcur_l, mcur_p, fcur_c, fcur_p;
 static int held[BTN_COUNT], hold_ms[BTN_COUNT], rep_ms[BTN_COUNT], rep_n[BTN_COUNT];
@@ -323,7 +323,7 @@ static void draw_strings(void)
         int x = s * cw + 3, w = cw - 6;
         int on = song.on[s], sel = s == cur_s;
         uint32_t col = scol[s];
-        /* one long roof falls across the four columns */
+        /* one long roof falls across the five columns */
         int drop = 6, top = BODY_Y + s * drop;
         roof(x, top, w, hh - s * drop, drop, sel ? gfx_mix(C_PANEL2, col, 0.14f) : C_PANEL);
         if (sel)
@@ -350,14 +350,14 @@ static void draw_strings(void)
 
 static void draw_drone(void)
 {
-    /* the house: a long low roof over the four strings, chimney meter */
+    /* the house: a long low roof over the five strings, chimney meter */
     int lx = 8, lw = 300, ly = BODY_Y, lh = FOOTER_Y - 6 - BODY_Y;
     roof(lx, ly, lw, lh, 54, C_PANEL);
     gfx_fill(lx + lw - 30, ly + 24, 10, 36, C_PANEL2); /* chimney */
     slant(lx, ly, lx + lw, ly + 54, 3, C_COPPER);
     gfx_text(lx + 12, ly + 64, song.gp[GP_MODE] == MODE_MONO ? "MONO DRONE" : "CHORD DRONE", C_DIM, FONT_SMALL);
     for (int s = 0; s < NS; s++) {
-        int y = ly + 120 + s * 72;
+        int y = ly + 116 + s * 60;
         char nm[8];
         int note = song.gp[GP_MODE] == MODE_MONO ? song.sp[0][SP_NOTE] : song.sp[s][SP_NOTE];
         note_name(song.gp[GP_ROOT] + note, nm, sizeof nm);

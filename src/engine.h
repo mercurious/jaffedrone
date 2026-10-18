@@ -1,4 +1,4 @@
-/* Jaffedrone audio engine: four Karplus-Strong strings kept ringing by a
+/* Jaffedrone audio engine: five Karplus-Strong strings kept ringing by a
  * noise bow, re-plucked on a tempo grid, in MONO (unison) or CHORD voicing,
  * with two beat-synced LFOs, a tempo-synced delay, a reverb, and Wi-Fi
  * tempo sync compatible with HI5. */
@@ -6,9 +6,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define JD_VERSION "0.0.1"
+#define JD_VERSION "0.0.2"
 
-#define NS 4
+#define NS 5
 #define NSP 10 /* params per string */
 #define NGP 7  /* global params */
 #define NLFO 2

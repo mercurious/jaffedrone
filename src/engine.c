@@ -5,7 +5,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SONG_MAGIC 0x4a445203u /* JDR3 */
+#define SONG_MAGIC 0x4a445204u    /* JDR4: five strings */
+#define SONG_MAGIC_V3 0x4a445203u /* JDR3: four strings (v0.0.1) */
+#define NS_V3 4
+typedef struct {
+    uint32_t magic;
+    int on[NS_V3];
+    int sp[NS_V3][NSP];
+    int gp[NGP];
+    int lfo[NLFO][NLP];
+    int fx[NFX];
+} SongV3;
 
 Song song;
 Live live;
@@ -24,7 +34,7 @@ static const ParamDef fparams[NFX] = {{"TIME", 0, 7},   {"FEEDBK", 0, 95}, {"MIX
 static const float gate_div16[8] = {0.f, 8.f, 4.f, 2.f, 1.f, 0.5f, 1.3333f, 0.6667f};
 static const char *const gate_names[8] = {"OFF", "1/2", "1/4", "1/8", "1/16", "1/32", "1/8T", "1/16T"};
 static const int pluck_beats[6] = {0, 1, 2, 4, 8, 16};
-static const char *const pluck_names[6] = {"OFF", "1 BEAT", "2 BEATS", "4 BEATS", "8 BEATS", "16 BEATS"};
+static const char *const pluck_names[6] = {"OFF", "1 BEAT", "2 BEATS", "1 BAR", "2 BARS", "4 BARS"};
 static const char *const note_names[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 static const char *const sync_names[NSYNCMODE] = {"OFF", "AUTO", "LEAD", "FOLLOW"};
 static const float lfo_div16[7] = {64.f, 32.f, 16.f, 8.f, 4.f, 2.f, 1.f};
@@ -37,7 +47,8 @@ static const char *const dly_names[8] = {"1/16", "1/8", "3/16", "1/4", "3/8", "1
 static const int def_sp[NS][NSP] = {{0, 0, 80, 35, 3, 85, 45, 0, 0, 0},
                                     {7, -4, 65, 45, 0, 92, 40, 0, 0, 0},
                                     {12, 3, 55, 40, 0, 95, 55, 0, 0, 0},
-                                    {19, 0, 40, 50, 4, 90, 65, 0, 0, 0}};
+                                    {19, 0, 40, 50, 4, 90, 65, 0, 0, 0},
+                                    {24, 2, 30, 55, 5, 93, 70, 0, 0, 0}};
 static const int def_gp[NGP] = {MODE_CHORD, 45, 72, 30, 70, 80, SYNC_OFF};
 static const int def_lfo[NLFO][NLP] = {{2, SH_SINE, LT_CUTOFF, 35}, {4, SH_TRI, LT_LEVEL, 0}};
 static const int def_fx[NFX] = {5, 45, 25, 35, 60, 55, 0, 5, 40};
@@ -218,12 +229,13 @@ void engine_set_position(double steps)
 void engine_set_rate(double r) { sync_rate = r < 0.9 ? 0.9 : r > 1.1 ? 1.1 : r; }
 
 /* a new chord: notes from a minor pentatonic + major sixth, spread over
- * two and a half octaves, low to high */
+ * three octaves, low to high */
 void engine_randomize(void)
 {
     static const int scale[] = {0, 3, 5, 7, 9, 10};
+    static const int octs[NS] = {-12, 0, 12, 12, 24};
     for (int s = 0; s < NS; s++) {
-        int oct = s == 0 ? -12 : s == 1 ? 0 : 12;
+        int oct = octs[s];
         int note = oct + scale[xr() % 6] + (s == 3 && frand() < 0.5f ? 12 : 0);
         if (note > 24)
             note -= 12;
@@ -457,7 +469,7 @@ void engine_render(int16_t *out, int frames)
                 st->w = st->w + 1 < DL_MAX ? st->w + 1 : 0;
 
                 o *= st->lvl_cur * st->gain * play_g;
-                float pan = (s - 1.5f) * 0.3f;
+                float pan = (s - (NS - 1) * 0.5f) * 0.25f;
                 L += o * (1.f - pan * 0.5f);
                 R += o * (1.f + pan * 0.5f);
                 send += o;
@@ -550,18 +562,41 @@ void engine_init(int sample_rate)
 
 static int clampi(int x, int lo, int hi) { return x < lo ? lo : x > hi ? hi : x; }
 
+static void fill_default(Song *s)
+{
+    memset(s, 0, sizeof *s);
+    s->magic = SONG_MAGIC;
+    for (int i = 0; i < NS; i++) {
+        s->on[i] = 1;
+        memcpy(s->sp[i], def_sp[i], sizeof s->sp[i]);
+    }
+    memcpy(s->gp, def_gp, sizeof s->gp);
+    memcpy(s->lfo, def_lfo, sizeof s->lfo);
+    memcpy(s->fx, def_fx, sizeof s->fx);
+}
+
 void song_default(void)
 {
-    memset(&song, 0, sizeof song);
-    song.magic = SONG_MAGIC;
-    for (int s = 0; s < NS; s++) {
-        song.on[s] = 1;
-        memcpy(song.sp[s], def_sp[s], sizeof song.sp[s]);
-    }
-    memcpy(song.gp, def_gp, sizeof song.gp);
-    memcpy(song.lfo, def_lfo, sizeof song.lfo);
-    memcpy(song.fx, def_fx, sizeof song.fx);
+    fill_default(&song);
     bpm_f = (float)song.gp[GP_BPM];
+}
+
+/* a four-string save: strings 1-4 as saved, string 5 from the defaults */
+static int load_v3(Song *s, const unsigned char *buf, size_t got)
+{
+    SongV3 o;
+    if (got != sizeof o)
+        return 0;
+    memcpy(&o, buf, sizeof o);
+    fill_default(s);
+    for (int i = 0; i < NS_V3; i++) {
+        s->on[i] = o.on[i];
+        memcpy(s->sp[i], o.sp[i], sizeof s->sp[i]);
+    }
+    memcpy(s->gp, o.gp, sizeof s->gp);
+    memcpy(s->lfo, o.lfo, sizeof s->lfo);
+    memcpy(s->fx, o.fx, sizeof s->fx);
+    return 1;
 }
 
 int song_load(const char *path)
@@ -570,9 +605,19 @@ int song_load(const char *path)
     if (!f)
         return 0;
     Song s;
-    size_t got = fread(&s, 1, sizeof s, f);
+    unsigned char buf[sizeof s + 1];
+    size_t got = fread(buf, 1, sizeof buf, f);
     fclose(f);
-    if (got != sizeof s || s.magic != SONG_MAGIC)
+    uint32_t magic = 0;
+    if (got >= sizeof magic)
+        memcpy(&magic, buf, sizeof magic);
+    if (magic == SONG_MAGIC && got == sizeof s)
+        memcpy(&s, buf, sizeof s);
+    else if (magic == SONG_MAGIC_V3) {
+        if (!load_v3(&s, buf, got))
+            return 0;
+    }
+    else
         return 0;
     for (int i = 0; i < NS; i++) {
         s.on[i] = !!s.on[i];

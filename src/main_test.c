@@ -136,8 +136,30 @@ int main(int argc, char **argv)
     song_default();
     song.gp[GP_MODE] = MODE_MONO;
     char v[20];
-    sparam_format(3, SP_NOTE, v, sizeof v);
-    printf("mono: string 4 note shows '%s'\n", v);
+    sparam_format(NS - 1, SP_NOTE, v, sizeof v);
+    printf("mono: string %d note shows '%s'\n", NS, v);
+
+    /* save compatibility: a v0.0.1 four-string file loads, string 5 gets defaults */
+    {
+        int32_t old[1 + 4 + 4 * NSP + NGP + NLFO * NLP + NFX];
+        memset(old, 0, sizeof old);
+        old[0] = 0x4a445203; /* JDR3 */
+        for (int s = 0; s < 4; s++)
+            old[1 + s] = s != 1;
+        old[1 + 4 + 1 * NSP + SP_NOTE] = 5;
+        old[1 + 4 + 3 * NSP + SP_LEVEL] = 77;
+        old[1 + 4 + 4 * NSP + GP_BPM] = 99;
+        old[1 + 4 + 4 * NSP + NGP + NLFO * NLP + FX_DMIX] = 66;
+        snprintf(path, sizeof path, "%s/old_v3.sav", out);
+        FILE *f = fopen(path, "wb");
+        fwrite(old, 1, sizeof old, f);
+        fclose(f);
+        song_default();
+        int ok = song_load(path);
+        printf("save compat v0.0.1: load=%d on2=%d note2=%d level4=%d bpm=%d dmix=%d string5 level=%d on=%d\n", ok,
+               song.on[1], song.sp[1][SP_NOTE], song.sp[3][SP_LEVEL], song.gp[GP_BPM], song.fx[FX_DMIX],
+               song.sp[4][SP_LEVEL], song.on[4]);
+    }
 
     /* tone shapers: each must change the spectrum, not the level much */
     {

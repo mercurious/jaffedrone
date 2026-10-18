@@ -1,11 +1,11 @@
 # Jaffedrone
 
-A four-string drone synthesizer for the Miyoo Mini Plus running OnionOS.
+A five-string drone synthesizer for the Miyoo Mini Plus running OnionOS.
 
 Each string is a Karplus-Strong loop with the Jaffe-Smith extensions: an
 allpass for fine tuning, a damping filter for brightness, and a loop gain for
 decay. A noise "bow" keeps the strings ringing, held in check by each loop's
-own level, and strings can re-pluck on a tempo grid. The four go through a
+own level, and strings can re-pluck on a tempo grid. The five go through a
 master lowpass and a reverb.
 
 ## Controls
