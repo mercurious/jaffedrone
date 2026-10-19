@@ -188,6 +188,11 @@ static double beat_phase, sync_rate = 1.0;
 static uint32_t beat;
 static float bpm_f = 72.f;
 static float master_g, play_g;
+/* output leveller: up to LEV_MAX of makeup gain, backing off so peaks sit
+ * at LEV_TARGET before MASTER */
+#define LEV_MAX 16.f
+#define LEV_TARGET 0.7f
+static float lev_env;
 static float f_ic1[2], f_ic2[2];
 static float lfo_rand[NLFO];
 static int lfo_cycle[NLFO];
@@ -325,10 +330,13 @@ void engine_render(int16_t *out, int frames)
     float drift_amt = song.gp[GP_DRIFT] / 100.f;
     float verb_send = song.fx[FX_VSEND] / 100.f, verb_decay = song.fx[FX_VTIME] / 100.f,
           verb_tone = song.fx[FX_VTONE] / 100.f;
-    float master_t = song.gp[GP_MASTER] / 100.f;
-    master_t *= master_t * 1.3f;
+    /* MASTER is a plain fader up to 80; above that it drives up to +14 dB
+     * into the soft clipper, trading clean peaks for loudness */
+    float m = song.gp[GP_MASTER] / 100.f;
+    float master_t = m <= 0.8f ? m * m * 1.3f : 0.832f * exp2f((m - 0.8f) * 12.f);
     float play_t = live.playing ? 1.f : 0.f;
     float g_ramp = 1.f / (0.02f * sr);
+    float lev_rel = expf(-1.f / (0.6f * sr));
     float meter[NS] = {0}, mm = 0.f;
     int mono = song.gp[GP_MODE] == MODE_MONO;
     float sps16 = sr * 15.f / bpm_f; /* samples per 16th */
@@ -550,6 +558,14 @@ void engine_render(int16_t *out, int frames)
             reverb_tick((send + (dl0 + dr0) * 0.5f * dly_mix) * vsend, &wl, &wr, verb_decay, verb_tone);
             L += wl;
             R += wr;
+
+            /* the bowed drone alone sits some 30 dB under the plucks:
+             * lift it, and duck the plucks instantly instead of clipping */
+            float pk = fmaxf(fabsf(L), fabsf(R));
+            lev_env = pk > lev_env ? pk : lev_env * lev_rel;
+            float lev = fminf(LEV_MAX, LEV_TARGET / fmaxf(lev_env, 1e-6f));
+            L *= lev;
+            R *= lev;
 
             master_g += (master_t - master_g) * g_ramp;
             L = softclip(L * master_g);
