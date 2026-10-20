@@ -22,3 +22,7 @@ drone, MENU exits.
 `make` cross-compiles `dist/Jaffedrone/jaffedrone` with zig against Onion's
 own SDL 1.2. `make test` renders a WAV and screenshots into `build/test` on
 the host. `make install SD=/path/to/card` copies the app into `App/`.
+
+## License
+
+MIT, copyright mercurious and sydilaxe. See [LICENSE](LICENSE).
