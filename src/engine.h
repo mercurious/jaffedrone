@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define JD_VERSION "0.0.3"
+#define JD_VERSION "0.0.4"
 
 #define NS 5
 #define NSP 10 /* params per string */
